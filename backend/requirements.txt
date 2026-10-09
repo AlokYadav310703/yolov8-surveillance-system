@@ -1,0 +1,9 @@
+fastapi>=0.110
+uvicorn[standard]>=0.27
+pydantic>=2
+python-multipart>=0.0.9
+numpy>=1.24
+opencv-python-headless>=4.8
+
+# Optional - only if you want to use your fine-tuned YOLOv8 face model:
+# ultralytics
