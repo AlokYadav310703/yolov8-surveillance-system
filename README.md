@@ -1,69 +1,64 @@
 # FaceWatch
 
 **Multi-camera face recognition with a live web dashboard.**
-Plug in cameras, add the faces you want to recognise, and FaceWatch records *who was seen, on which camera, and when*.
 
-The project is two independent parts that you can run on one computer or host separately:
-
-| Part | Technology | What it does |
-|---|---|---|
-| `backend/` | Python, FastAPI | Finds cameras, detects and recognises faces, stores the log, streams live video |
-| `frontend/` | React, Vite | The dashboard. A static website that can be hosted anywhere |
-
----
-
-## Contents
-
-1. [Features](#features)
-2. [Quick start](#quick-start)
-3. [First-time walkthrough](#first-time-walkthrough)
-4. [How it works](#how-it-works)
-5. [Project structure](#project-structure)
-6. [Configuration](#configuration)
-7. [Hosting the frontend and backend separately](#hosting-the-frontend-and-backend-separately)
-8. [Using your own YOLOv8 face model](#using-your-own-yolov8-face-model)
-9. [API reference](#api-reference)
-10. [Tuning](#tuning)
-11. [Troubleshooting](#troubleshooting)
-12. [Privacy and security](#privacy-and-security)
-13. [Limitations](#limitations)
-
----
+FaceWatch detects and recognises faces from USB cameras, network streams, or video files. It displays live camera feeds and records recognised and unknown face sightings with timestamps.
 
 ## Features
 
-- **Automatic camera detection.** USB cameras are found by themselves, a few seconds after you plug them in, and disappear when unplugged. No configuration needed.
-- **Many cameras at once.** Every camera is processed independently and shown live.
-- **Network cameras and video files.** Add an RTSP/HTTP stream or a video file (handy for testing) from the Settings page.
-- **Start and stop each camera.** Stopping releases the camera completely (its light goes off and other apps can use it). The choice is remembered after a restart.
-- **Activity log.** Every sighting is recorded with a face snapshot, the person's name (or "Unknown"), the camera, the time and the match score. Filter it, export it as CSV, or clear it.
-- **Add and remove faces** from photos, or capture a face straight from a live camera.
-- **Dashboard.** Live camera thumbnails, today's counts, a 24-hour chart, the latest sightings, and the most-seen people.
-- **Smooth live video.** Recognition runs separately from the video, so a slow recognition pass never freezes the picture. Face boxes glide smoothly on screen.
-- **Runs on ordinary computers.** CPU only; no GPU, no database server, no Docker needed.
-- **Optional YOLOv8 detector.** Use your own fine-tuned face detection model if you have one.
+- Automatic USB camera detection and support for multiple cameras
+- Support for RTSP/HTTP camera streams and video files
+- Add people from photos or capture a face from a live camera
+- Live dashboard with camera feeds, face labels, activity logs, and statistics
+- Export activity logs to CSV
+- CPU-based processing; no GPU or database server required
+- Optional custom YOLOv8 face detector
 
-## Quick start
+## Tech stack
 
-**You need:** Python 3.9 or newer, Node.js 18 or newer, and an internet connection for the first run (about 40 MB of face models are downloaded once).
+- **Backend:** Python, FastAPI, OpenCV, SQLite
+- **Frontend:** React, Vite
+- **Face detection:** YuNet by default, optional YOLOv8
+- **Face recognition:** SFace
+- **Live updates:** WebSocket
 
-Open **two terminals**.
+## Requirements
 
-**Terminal 1: backend**
+- Python 3.9+
+- Node.js 18+
+- Internet connection on first run to download the face models
+
+## Getting started
+
+### 1. Start the backend
 
 ```bash
 cd backend
 python -m venv venv
-venv\Scripts\activate              # Windows
-source venv/bin/activate           # macOS / Linux
+```
 
+Activate the virtual environment:
+
+```bash
+# Windows
+venv\Scripts\activate
+
+# macOS / Linux
+source venv/bin/activate
+```
+
+Install dependencies and start the API:
+
+```bash
 pip install -r requirements.txt
 python run.py
 ```
 
-Wait for `FaceWatch API running at http://127.0.0.1:8000`. Leave this terminal open.
+The backend runs at `http://127.0.0.1:8000`.
 
-**Terminal 2: frontend**
+### 2. Start the frontend
+
+Open a second terminal:
 
 ```bash
 cd frontend
@@ -71,288 +66,65 @@ npm install
 npm run dev
 ```
 
-Open **http://localhost:5173** in your browser.
+Open `http://localhost:5173` in your browser.
 
-> On macOS and Linux, use `python3` if `python` is not found.
+## How to use
 
-**Next time** you only need `venv\Scripts\activate` + `python run.py` in the backend folder, and `npm run dev` in the frontend folder.
+1. Open **People** and add a person's name with clear photos, or capture a face from a camera.
+2. Open **Live view** to see camera feeds and recognition results.
+3. Use the **Dashboard** and **Activity log** to review sightings.
+4. Use **Settings** to manage cameras and recognition/logging options.
+5. Export filtered activity logs using **Export CSV**.
 
-## First-time walkthrough
-
-1. **Check the cameras.** The sidebar shows how many cameras are online. Plug in a USB camera and wait about 10 seconds, or press *Scan for cameras now* in **Settings**.
-2. **Add a face.** Go to **People**, type a name, choose one or more clear photos, and press *Add from photos*. Or choose a camera and press *Capture face from camera*.
-3. **Walk in front of a camera.** The **Live view** page draws a green box with the person's name when they are recognised, and an amber box for unknown faces.
-4. **See the results.** The **Dashboard** and **Activity log** pages fill up as people are seen.
-
-**Photos that work well:** one person per photo, the face clearly visible, good lighting, looking towards the camera. Three to five photos per person (different angles or lighting) work much better than one. To add more photos to someone, use the same name again.
-
-### Everyday tasks
-
-| I want to… | How |
-|---|---|
-| Stop or start a camera | **Stop / Start** button on its tile (Dashboard, Live view) or in Settings |
-| Rename a camera | Settings → Cameras → *Rename* |
-| Add an IP camera | Settings → Cameras → name + address, e.g. `rtsp://user:password@192.168.1.20:554/stream1` |
-| Test without a camera | Settings → Cameras → give the path of a video file; it plays in a loop |
-| Remove a person | People → *Remove* (their face data is deleted; old log entries stay) |
-| Export the log | Activity log → *Export CSV* (uses the current filters) |
-| Stop logging strangers | Settings → untick *Also log faces that match nobody* |
-| Back up everything | Copy the `backend/data/` folder |
-| Start completely fresh | Stop the backend, delete `backend/data/` |
-
-## How it works
-
-```
- Camera (USB / RTSP / file)
-        │  OpenCV
-        ▼
- ┌─ capture thread ───────────────┐        ┌─ recognition thread ───────────────────┐
- │ reads the newest frame         │        │ takes the newest frame when it is free │
- │ JPEG-encodes it for viewers    │        │ finds faces  → YuNet (or YOLOv8)       │
- └──────────────┬─────────────────┘        │ tracks them between frames             │
-                │                          │ embeds new faces → SFace (128 numbers) │
-                │                          │ matches against enrolled people        │
-                │                          └───────────────┬────────────────────────┘
-                │ video                                    │ face boxes + names     │ log
-                ▼                                          ▼                        ▼
-            WebSocket (/ws) ◄────────────── FastAPI ──────────────────────► SQLite + snapshots
-                │
-                ▼
-        React dashboard (draws video + boxes on a canvas)
-```
-
-**Why the video stays smooth:** each camera has two threads. One only reads and sends video; the other does the heavy AI work. If recognition is slow, the boxes update a little later, but the video never stalls.
-
-**One WebSocket for everything live.** All camera video and face boxes travel over a single connection, and only the newest frame is ever sent, so a slow network skips frames instead of falling behind. Browser tabs that are hidden stop receiving video.
-
-**Face tracking.** A face that is already recognised is only re-checked about once a second, which keeps CPU use low and stops names from flickering.
-
-**Matching.** Each face becomes a 128-number embedding. It is compared with every enrolled embedding using cosine similarity, and the best match counts if it is above the *Match strictness* setting.
-
-**Logging rules.** The same person is logged again on the same camera only after the *cooldown* (default 10 s). Unknown faces are logged at most every 30 s per camera.
+For better results, use clear, well-lit photos with the face visible. Multiple photos from different angles can improve matching.
 
 ## Project structure
 
-```
+```text
 FaceWatch/
-├── README.md
 ├── backend/
-│   ├── run.py                  start the API  (python run.py)
+│   ├── run.py
 │   ├── requirements.txt
-│   ├── Dockerfile
 │   ├── app/
-│   │   ├── main.py             FastAPI routes + WebSocket
-│   │   ├── cameras.py          camera discovery, capture and recognition threads
-│   │   ├── face_engine.py      detection (YuNet / YOLO), recognition (SFace), matching
-│   │   ├── database.py         SQLite helpers
-│   │   └── config.py           every tunable number
-│   ├── models/                 face models (downloaded automatically)
-│   └── data/                   created on first run: facewatch.db, snapshots/, faces/
+│   │   ├── main.py
+│   │   ├── cameras.py
+│   │   ├── face_engine.py
+│   │   ├── database.py
+│   │   └── config.py
+│   ├── models/
+│   └── data/        # Created at runtime; contains database and face images
 └── frontend/
     ├── package.json
-    ├── vite.config.js
-    ├── index.html
-    ├── public/config.js        backend address for hosted builds (editable without rebuilding)
+    ├── public/config.js
     └── src/
-        ├── App.jsx             layout, navigation, connection check
-        ├── api.js              talks to the backend
-        ├── live.js             the shared WebSocket (video + boxes)
-        ├── hooks.js            small shared helpers
-        ├── styles.css
-        ├── components/         LiveCanvas, Sidebar, ConnectScreen
-        └── pages/              Dashboard, Live, People, Logs, Settings
 ```
 
-## Configuration
+## Configuration and deployment
 
-### Backend options
+- The backend listens on `127.0.0.1:8000` by default.
+- Use `--host 0.0.0.0` to allow connections from other devices on the network.
+- Configure allowed frontend origins with `--cors` or `FACEWATCH_CORS_ORIGINS`.
+- Set `--api-key` or `FACEWATCH_API_KEY` before exposing the backend to other devices.
+- For hosted deployments, configure the frontend with the backend URL. An HTTPS frontend requires an HTTPS backend.
+- USB cameras must be connected to the computer running the backend. Remote servers can only access network cameras they can reach.
 
-Set with a command-line flag or an environment variable.
+API documentation is available at `http://127.0.0.1:8000/docs` while the backend is running.
 
-| Flag | Environment variable | Meaning |
-|---|---|---|
-| `--host` | – | Address to listen on. Default `127.0.0.1` (this computer only). Use `0.0.0.0` to allow other devices |
-| `--port` | – | Default `8000` |
-| `--api-key` | `FACEWATCH_API_KEY` | Require this key on every request. Off if empty |
-| `--cors` | `FACEWATCH_CORS_ORIGINS` | Websites allowed to use the API, comma-separated. `*` means any. Default: the local development addresses |
-| – | `FACEWATCH_DATA_DIR` | Where the database and snapshots are stored |
-| – | `FACEWATCH_MODELS_DIR` | Where the face models are stored |
-| – | `FACEWATCH_YOLO_CONF` / `FACEWATCH_YOLO_IMGSZ` | YOLO confidence (default 0.4) and image size (default 640) |
+## Using a custom YOLOv8 model
 
-Example: `python run.py --host 0.0.0.0 --api-key MY_LONG_SECRET --cors https://my-ui.netlify.app`
-
-### Settings in the web interface
-
-| Setting | Default | Meaning |
-|---|---|---|
-| Match strictness | 0.363 | How alike a face must be to count as a match. Higher = stricter |
-| Log the same person again after | 10 s | Cooldown per person per camera |
-| Also log faces that match nobody | on | Record unknown faces |
-
-### Tunable numbers in `backend/app/config.py`
-
-| Name | Default | Meaning |
-|---|---|---|
-| `MAX_CAMERA_INDEX` / `SCAN_INTERVAL` | 10 / 10 s | How many USB camera slots to check, and how often |
-| `CAPTURE_WIDTH` / `CAPTURE_HEIGHT` | 1280 × 720 | Resolution requested from USB cameras |
-| `DETECT_MAX_SIDE` | 960 | Frames are shrunk to this size before face finding |
-| `DETECT_INTERVAL` | 0.1 s | Minimum time between recognition passes per camera |
-| `REEMBED_KNOWN` / `REEMBED_UNKNOWN` | 1.0 / 0.5 s | How often a tracked face is re-checked |
-| `MIN_FACE_PX` | 40 | Smallest face (in pixels) that is recognised |
-| `STREAM_LARGE` | 960 px, 25 fps, quality 72 | Video size for the Live view page |
-| `STREAM_SMALL` | 480 px, 10 fps, quality 65 | Video size for dashboard thumbnails |
-
-## Hosting the frontend and backend separately
-
-### Frontend
-
-The frontend is just static files. Build it and upload the `dist/` folder to any static host (Netlify, Vercel, Cloudflare Pages, GitHub Pages, S3, Nginx…).
-
-```bash
-cd frontend
-npm run build          # creates frontend/dist
-```
-
-Tell it where the backend is, in any one of these ways:
-
-- Edit `dist/config.js` and set `window.FW_CONFIG = { apiUrl: "https://your-backend" }`. No rebuild needed.
-- Do nothing: on the first visit the app shows a **Connect** screen where you type the address (remembered in that browser).
-- Build with `VITE_API_URL=https://your-backend npm run build`.
-
-### Backend: three things to know
-
-1. **USB cameras only work on the computer they are plugged into.** Run the backend on that computer (or a small machine next to the cameras) and host only the frontend in the cloud. A cloud server can only use *network* cameras (RTSP/HTTP) that it can reach over the internet or a VPN.
-2. **An HTTPS website can only talk to an HTTPS backend.** If the frontend is on `https://…`, the backend must be reachable over `https://` as well (live video then uses `wss://`). The simplest way is a tunnel or reverse proxy in front of the backend: Cloudflare Tunnel, ngrok, Caddy, or Nginx with a certificate.
-3. **Always protect it when it is reachable by others.** Anyone who can reach the backend can see the cameras and faces. Start it with an access key and the allowed website:
+1. Install Ultralytics in the backend virtual environment:
 
    ```bash
-   python run.py --host 0.0.0.0 --api-key YOUR_LONG_SECRET --cors https://your-frontend.example.com
+   pip install ultralytics
    ```
 
-   The frontend then asks for the key once and remembers it.
+2. Place your model weights at `backend/models/yolov8_face_best.pt`.
+3. Restart the backend and select the custom detector in Settings if available.
 
-### Docker (backend)
+YOLOv8 is used for face detection; SFace still performs face recognition.
 
-`backend/Dockerfile` is included.
+## Privacy and limitations
 
-```bash
-cd backend
-docker build -t facewatch-api .
-docker run -p 8000:8000 -v facewatch:/data \
-  -e FACEWATCH_API_KEY=secret -e FACEWATCH_CORS_ORIGINS=https://your-ui.example.com \
-  facewatch-api
-```
+Face data and snapshots are biometric personal data. Inform people where required, restrict access, and protect the `backend/data/` directory. Use an API key and HTTPS when exposing the backend beyond your own computer.
 
-Network cameras work on any operating system. For USB cameras, add `--device /dev/video0` (Linux hosts only).
-
-### Bandwidth
-
-As a rough guide, a camera on the Live view page uses about 1–1.5 MB/s and a dashboard thumbnail about 0.15 MB/s, depending on the scene. For viewing over a slow connection, lower `STREAM_LARGE` and `STREAM_SMALL` in `config.py`.
-
-## Using your own YOLOv8 face model
-
-FaceWatch uses the built-in YuNet detector by default, which works well. If you have trained a YOLOv8 face detector:
-
-1. `pip install ultralytics` (inside the backend virtual environment)
-2. Copy your weights to `backend/models/yolov8_face_best.pt`
-3. Restart the backend
-
-**Settings → Face detector** will then say *YOLOv8 (custom)*. The model only finds faces; recognition is still done by SFace. Use the same image size you trained with (default 640, change it with `FACEWATCH_YOLO_IMGSZ`).
-
-## API reference
-
-Interactive documentation with a "try it" button is available at **`/docs`** on the backend (e.g. http://127.0.0.1:8000/docs).
-
-If an access key is set, send it as the `X-API-Key` header, or as `?key=…` in the address (needed for images and downloads).
-
-### Cameras
-
-| Method | Path | Purpose |
-|---|---|---|
-| GET | `/api/cameras` | List cameras with status (`online`, `paused`, `fps`, `faces`) |
-| POST | `/api/cameras/rescan` | Look for newly plugged-in USB cameras now |
-| POST | `/api/cameras` | Add a network camera or video file `{name, source}` |
-| PUT | `/api/cameras/{id}` | Rename `{name}` |
-| POST | `/api/cameras/{id}/stop` | Stop the camera and release it |
-| POST | `/api/cameras/{id}/start` | Start it again |
-| DELETE | `/api/cameras/{id}` | Remove a network camera (USB cameras disappear when unplugged) |
-
-### People
-
-| Method | Path | Purpose |
-|---|---|---|
-| GET | `/api/people` | List enrolled people with photo count and last seen |
-| POST | `/api/people` | Add photos (multipart form: `name`, `files`). Same name adds photos to that person |
-| POST | `/api/people/from-camera` | Capture a face from a live camera `{name, camera_id}` |
-| GET | `/api/people/{id}/photo` | Thumbnail |
-| DELETE | `/api/people/{id}` | Remove a person |
-
-### Log, stats and settings
-
-| Method | Path | Purpose |
-|---|---|---|
-| GET | `/api/logs` | Entries. Query: `limit`, `offset`, `person`, `camera`, `start`, `end` (Unix seconds) |
-| GET | `/api/logs/export.csv` | Same filters, as a CSV download |
-| DELETE | `/api/logs` | Clear the log and snapshots |
-| GET | `/snapshots/{file}` | Face snapshot image |
-| GET | `/api/stats` | Numbers and charts for the dashboard |
-| GET / PUT | `/api/settings` | Read or change `threshold`, `cooldown`, `log_unknown` |
-| GET | `/api/health` | Is the server up, and is a key required (always open) |
-
-### Live WebSocket: `/ws`
-
-- Browser → server: `{"sub": {"<camera id>": "large" | "small"}}`, the cameras to watch and at which size. Send it again to change.
-- Server → browser, text: `{"t":"det","cam":…,"w":…,"h":…,"faces":[{"x","y","w","h","name","sim"}],"online":…,"paused":…,"fps":…}`
-- Server → browser, binary: one byte with the camera-id length, the camera id, then a JPEG image.
-
-## Tuning
-
-| Problem | What to try |
-|---|---|
-| The wrong person gets named | Raise *Match strictness* (try 0.45, then 0.5) |
-| The right person shows as Unknown | Lower it (try 0.32); add more photos of them; improve lighting |
-| Same person logged too often | Raise *Log the same person again after* |
-| Too many Unknown entries | Untick *Also log faces that match nobody* |
-| Computer is slow | In `config.py` raise `DETECT_INTERVAL` (e.g. 0.25) or lower `DETECT_MAX_SIDE` (e.g. 640). The video stays smooth; only the boxes update less often |
-| Faces are small or far away | Raise `CAPTURE_WIDTH/HEIGHT` and `DETECT_MAX_SIDE`; lower `MIN_FACE_PX` a little |
-| Remote viewing is choppy | Lower the size, fps or quality in `STREAM_LARGE` / `STREAM_SMALL` |
-
-## Troubleshooting
-
-**"Cannot reach the backend" in the browser**
-Open `http://127.0.0.1:8000/api/health`. If it does not load, the backend is not running: check the backend terminal for an error and run `python run.py` again. If it loads, change the address on the Connect screen to `http://127.0.0.1:8000`, or start the backend with `--cors "http://your-frontend-address"`.
-
-**The model download fails**
-The error message names two `.onnx` files and where to get them. Download them into `backend/models/`. To check your setup, run `python -m app.face_engine some_photo.jpg` from the backend folder; it should report the faces found.
-
-**The app asks for an access key**
-The backend was started with a key (`--api-key`, or a `FACEWATCH_API_KEY` variable that is still set in your terminal). Enter the key, or restart the backend without it.
-
-**No camera is found**
-Close other programs that use the camera (Zoom, Teams, browser tabs). *Windows:* Settings → Privacy → Camera → allow desktop apps. *macOS:* allow camera access for your terminal. *Linux:* add your user to the `video` group, then log in again. A camera you stopped in FaceWatch stays stopped; press **Start**.
-
-**`ModuleNotFoundError`**
-The virtual environment is not active, or `pip install -r requirements.txt` did not finish. Activate it and install again.
-
-**Port already in use**
-Start the backend with `python run.py --port 8010` and set the backend address to `http://127.0.0.1:8010` on the Connect screen.
-
-**The video works locally but not when hosted**
-An `https://` website needs an `https://` backend. See [Hosting](#hosting-the-frontend-and-backend-separately).
-
-**Windows: strange errors when the folder path has non-English characters**
-Move the project to a simple path such as `C:\FaceWatch`.
-
-## Privacy and security
-
-- Face data is **biometric personal data**. Tell the people who are recorded, keep only what you need (use *Clear log* regularly), and follow the rules that apply where you are (for example India's DPDP Act 2023, or GDPR).
-- By default the backend only accepts connections from the same computer.
-- If you open it to other devices or host it, **set an access key** and serve it over HTTPS.
-- Snapshots and face thumbnails are plain image files in `backend/data/`. Protect that folder like any other sensitive data, and do not publish it (for example on GitHub).
-
-## Limitations
-
-- Recognition is statistical, so mistakes are possible, especially with poor lighting, extreme angles, masks, or very small faces. **Do not use FaceWatch as the only protection for anything where a wrong match has serious consequences** (door access, payments, legal decisions).
-- There is a single shared login key, not user accounts.
-- Processing is CPU only. Many cameras at high resolution on a weak computer will need the tuning options above.
-- The backend is one process with local storage, which suits a home, shop or small office, not a large deployment.
+Face recognition can make mistakes, particularly with poor lighting, unusual angles, masks, or small faces. Do not rely on it as the sole basis for high-impact decisions. The application uses CPU processing and local storage, so performance and scale depend on the computer running it.
